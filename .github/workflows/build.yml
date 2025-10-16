@@ -1,0 +1,151 @@
+name: Build application
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Set up Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ./target
+          key: build-cargo-registry-${{ runner.os }}
+      - name: Run unit tests
+        run: cargo test --verbose
+
+  build:
+    name: Build binary – ${{ matrix.TARGET }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - TARGET: x86_64-unknown-linux-gnu
+            OS: ubuntu-latest
+          - TARGET: x86_64-unknown-linux-musl
+            TARGET_CC: x86_64-linux-gnu-gcc
+            TARGET_AR: x86_64-linux-gnu-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: aarch64-unknown-linux-gnu
+            TARGET_CC: aarch64-linux-gnu-gcc
+            TARGET_AR: aarch64-linux-gnu-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: aarch64-unknown-linux-musl
+            TARGET_CC: aarch64-linux-gnu-gcc
+            TARGET_AR: aarch64-linux-gnu-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: armv7-unknown-linux-gnueabihf
+            TARGET_CC: arm-linux-gnueabihf-gcc
+            TARGET_AR: arm-linux-gnueabihf-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: armv7-unknown-linux-musleabihf
+            TARGET_CC: arm-linux-gnueabihf-gcc
+            TARGET_AR: arm-linux-gnueabihf-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: arm-unknown-linux-gnueabihf
+            TARGET_CC: arm-linux-gnueabihf-gcc
+            TARGET_AR: arm-linux-gnueabihf-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: arm-unknown-linux-musleabihf
+            TARGET_CC: arm-linux-gnueabihf-gcc
+            TARGET_AR: arm-linux-gnueabihf-gcc-ar
+            OS: ubuntu-latest
+          - TARGET: x86_64-apple-darwin
+            OS: macos-latest
+          - TARGET: aarch64-apple-darwin
+            OS: macos-latest
+          - TARGET: x86_64-pc-windows-msvc
+            OS: windows-latest
+    runs-on: ${{ matrix.OS }}
+    env:
+      NAME: cupcake
+      TARGET: ${{ matrix.TARGET }}
+      TARGET_CC: ${{ matrix.TARGET_CC }}
+      TARGET_AR: ${{ matrix.TARGET_AR }}
+      OS: ${{ matrix.OS }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      - name: Set up Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ./target
+          key: build-cargo-registry-${{matrix.TARGET}}
+      - name: Install and configure dependencies
+        shell: bash
+        run: |
+          if [[ $OS =~ ^ubuntu.*$ ]]; then
+            sudo apt-get update
+            sudo apt-get install -qq crossbuild-essential-arm64 crossbuild-essential-armhf
+          fi
+          # some additional configuration for cross-compilation on linux
+          cat >>~/.cargo/config <<EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          [target.aarch64-unknown-linux-musl]
+          linker = "aarch64-linux-gnu-gcc"
+          [target.armv7-unknown-linux-gnueabihf]
+          linker = "arm-linux-gnueabihf-gcc"
+          [target.armv7-unknown-linux-musleabihf]
+          linker = "arm-linux-gnueabihf-gcc"
+          [target.arm-unknown-linux-gnueabihf]
+          linker = "arm-linux-gnueabihf-gcc"
+          [target.arm-unknown-linux-musleabihf]
+          linker = "arm-linux-gnueabihf-gcc"
+          EOF
+      - name: Install Rust target
+        shell: bash
+        run: rustup target add $TARGET
+      - name: Build release target
+        shell: bash
+        run: cargo build --release --verbose --target $TARGET
+      - name: Compress
+        shell: bash
+        run: |
+          mkdir -p ./artifacts
+          if [[ $OS =~ ^macos.*$ ]]; then
+            export PATH="$(brew --prefix gnu-tar)/libexec/gnubin:$PATH"
+          fi
+          if [[ $OS =~ ^windows.*$ ]]; then
+              EXEC=$NAME.exe
+          else
+              EXEC=$NAME
+          fi
+          mv ./target/$TARGET/release/$EXEC ./$EXEC
+          tar -czf ./artifacts/$NAME-$TARGET-${GITHUB_REF_NAME//\//-}.tar.gz $EXEC
+      - name: Archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-${{ matrix.TARGET }}
+          path: |
+            ./artifacts
+
+  deploy:
+    name: Attach downloads to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          pattern: release-build-*
+          merge-multiple: true
+      - name: Release to GitHub
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./artifacts/*.tar.gz
