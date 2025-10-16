@@ -1,0 +1,243 @@
+use std::fmt::Display;
+
+use serde::{de, Deserialize, Deserializer};
+
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct ChatMessage {
+    pub time: u64,
+    pub username: String,
+    #[serde(deserialize_with = "MessageContainer::deserialize_from")]
+    pub msg: MessageContainer,
+}
+
+impl Display for ChatMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}\t{}\t{}\t{}",
+            self.time, self.msg.team, self.username, self.msg.text
+        )
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MessageContainer {
+    text: String,
+    team: Team,
+}
+
+impl MessageContainer {
+    fn deserialize_from<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v: String = Deserialize::deserialize(deserializer)?;
+        let dom = html_parser::Dom::parse(&v).map_err(de::Error::custom)?;
+        let mut text = String::new();
+        let mut team = Team::Empty;
+        for child in dom.children {
+            match child {
+                html_parser::Node::Text(t) => {
+                    text += &t;
+                }
+                html_parser::Node::Element(element)
+                    if element.name == "span" && element.classes == ["teamColorSpan"] =>
+                {
+                    if let Some(html_parser::Node::Text(t)) = element.children.first() {
+                        if let Some(named) = Team::named_from_element(t) {
+                            team = named
+                        }
+                    }
+                }
+                html_parser::Node::Element(element) => {
+                    text += &element.source_span.text;
+                }
+                other => {
+                    log::debug!("Found an unexpected member in message: {:?}", other)
+                }
+            }
+        }
+        Ok(MessageContainer {
+            text: text.trim().to_string(),
+            team,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum Team {
+    Empty,
+    Named(String),
+}
+
+impl Display for Team {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Team::Empty => write!(f, "NULL"),
+            Team::Named(name) => write!(f, "{}", name),
+        }
+    }
+}
+
+impl Team {
+    /// Convert span text into a team name.
+    fn named_from_element(text: &str) -> Option<Self> {
+        if !text.starts_with("-team") {
+            return None;
+        }
+        if text.chars().last() != Some('-') {
+            return None;
+        }
+        let name = &text[5..text.len() - 1];
+        if name.is_empty() {
+            return None;
+        }
+        Some(Self::Named(name.to_string()))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SocketConfig {
+    pub servers: Vec<SocketConfigServer>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SocketConfigServer {
+    pub url: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use test_case::test_case;
+
+    use super::{ChatMessage, MessageContainer, Team};
+    use serde_json::json;
+
+    #[test]
+    fn chat_message_deserialize_image() {
+        let timestamp: u64 = 1760633254810;
+        let json = json!({
+            "username": "ChetBaker",
+            "msg": "<a href=\"https://example.com/image.jpg?ex=1234&amp;is=5678\" target=\"_blank\">\
+                <img src=\"https://example.com/image.jpg?ex=1234&amp;is=5678\" /></a>",
+            "meta": {},
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "ChetBaker".into(),
+                msg: MessageContainer {
+                    text: "<a href=\"https://example.com/image.jpg?ex=1234&amp;is=5678\" target=\"_blank\">\
+                        <img src=\"https://example.com/image.jpg?ex=1234&amp;is=5678\" /></a>".into(),
+                    team: Team::Empty,
+                },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_deserialize_greentext() {
+        let timestamp: u64 = 1760634672025;
+        let json = json!({
+            "username": "PotF",
+            "msg": "&gt;XD <span style=\"display:none\" class=\"teamColorSpan\">-teamwg-</span>",
+            "meta": {
+                "addClass": "greentext"
+            },
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "PotF".into(),
+                msg: MessageContainer {
+                    text: "&gt;XD".into(),
+                    team: Team::Named("wg".into()),
+                },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_deserialize_named_team() {
+        let timestamp: u64 = 1760608841390;
+        let json = json!({
+            "username": "ChatSpammer",
+            "msg": ":harmony: :harmony: <span style=\"display:none\" class=\"teamColorSpan\">-teamck-</span>",
+            "meta": {},
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "ChatSpammer".into(),
+                msg: MessageContainer {
+                    text: ":harmony: :harmony:".into(),
+                    team: Team::Named("ck".into()),
+                },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_deserialize_null() {
+        let timestamp: u64 = 1760631669671;
+        let json = json!({
+            "username": "Yuu",
+            "msg": "It's hip to be square.",
+            "meta": {},
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "Yuu".into(),
+                msg: MessageContainer {
+                    text: "It's hip to be square.".into(),
+                    team: Team::Empty,
+                },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_display() {
+        //42["chatMsg",{"username":"InuDoggo","msg":" <span style=\"display:none\" class=\"teamColorSpan\">-teamm-</span>","meta":{"addClass":"spoiler"},"time":}]
+        let chat = ChatMessage {
+            time: 1760634889806,
+            username: "Dog".into(),
+            msg: MessageContainer {
+                text: "5 &gt; 3".into(),
+                team: Team::Named("vg".into()),
+            },
+        };
+        assert_eq!(format!("{}", chat), "1760634889806\tvg\tDog\t5 &gt; 3");
+    }
+
+    #[test_case(Team::Empty, "NULL" ; "empty")]
+    #[test_case(Team::Named("vg".into()), "vg" ; "named")]
+    fn team_display(team: Team, expected: &str) {
+        let output = format!("{}", team);
+        assert_eq!(output, expected);
+    }
+
+    #[test_case("-team-", None ; "blank")]
+    #[test_case("-team1999-", Some(Team::Named("1999".into())) ; "numerical")]
+    #[test_case("-teama-", Some(Team::Named("a".into())) ; "short")]
+    #[test_case("-teamhanny-", Some(Team::Named("hanny".into())) ; "long")]
+    #[test_case("-teamv", None ; "missing suffix")]
+    #[test_case("teamv", None ; "broken prefix")]
+    fn team_named_from_element(text: &str, expected: Option<Team>) {
+        let team = Team::named_from_element(text);
+        assert_eq!(team, expected);
+    }
+}
