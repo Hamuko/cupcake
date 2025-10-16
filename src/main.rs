@@ -4,19 +4,16 @@ mod utils;
 use chrono::Utc;
 use clap::Parser;
 use futures_util::FutureExt;
-use rust_socketio::asynchronous::ClientBuilder;
+use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Payload, TransportType};
 use serde_json::json;
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::prelude::*;
-use std::sync::Arc;
 use tokio::signal;
-use tokio::time::Duration;
-use tokio::{sync::mpsc, time::timeout};
+use tokio::sync::mpsc;
 
 const BUFFER_COUNT: usize = 64;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -53,6 +50,20 @@ fn create_chat_log_file(channel: &str) -> File {
         Utc::now().format("%Y%m%dT%H%M%S")
     );
     File::create(filename).expect("Could not create output file")
+}
+
+/// Join a channel on the Cytube server.
+async fn join_channel(client: &Client, channel_name: &str) {
+    match client
+        .emit("joinChannel", json!({"name": channel_name}))
+        .await
+    {
+        Ok(_) => log::info!("Joined channel {}", channel_name),
+        Err(e) => {
+            log::error!("Could not join channel {}: {}", channel_name, e);
+            return;
+        }
+    };
 }
 
 /// Fetch Cytube socket config and return the URL of the first Socket.IO server.
@@ -111,16 +122,13 @@ async fn main() {
     let chat_tx = tx.clone();
     let disconnect_tx = tx.clone();
 
-    let notify = Arc::new(tokio::sync::Notify::new());
-    let notify_clone = notify.clone();
-
     let socket = ClientBuilder::new(socket_address)
         .transport_type(TransportType::Any)
-        .on(rust_socketio::Event::Connect, move |_, _| {
-            let cl = notify_clone.clone();
+        .on(rust_socketio::Event::Connect, move |_, client| {
+            let channel_name = args.channel.clone();
             async move {
                 log::info!("Connected to server");
-                cl.notify_one();
+                join_channel(&client, &channel_name).await;
             }
             .boxed()
         })
@@ -155,22 +163,8 @@ async fn main() {
         .await
         .expect("Connection failed");
 
-    timeout(CONNECT_TIMEOUT, notify.notified())
-        .await
-        .expect("Timed out connecting");
-
-    match socket
-        .emit("joinChannel", json!({"name": args.channel}))
-        .await
-    {
-        Ok(_) => log::info!("Joined channel {}", args.channel),
-        Err(e) => {
-            log::error!("Could not join channel {}: {}", args.channel, e);
-            return;
-        }
-    };
-
     let manager = tokio::spawn(async move {
+        let mut last_timestamp: u64 = 0;
         while let Some(event) = rx.recv().await {
             match event {
                 Event::Chat(values) => {
@@ -182,6 +176,13 @@ async fn main() {
                                 continue;
                             }
                         };
+
+                        // Ignore past messages in case of reconnects.
+                        if last_timestamp >= chat.time {
+                            continue;
+                        }
+                        last_timestamp = chat.time;
+
                         match write!(&mut file, "{}\n", chat) {
                             Ok(_) => log::debug!("{}", chat),
                             Err(e) => log::warn!("Failed to write '{}' to file: {}", chat, e),
