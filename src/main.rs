@@ -49,7 +49,9 @@ fn create_chat_log_file(channel: &str) -> File {
         channel,
         Utc::now().format("%Y%m%dT%H%M%S")
     );
-    File::create(filename).expect("Could not create output file")
+    let file = File::create(&filename).expect("Could not create output file");
+    log::info!("Created chat log file {}", filename);
+    file
 }
 
 /// Join a channel on the Cytube server.
@@ -144,7 +146,16 @@ async fn main() {
         })
         .on("error", |err, _| {
             async move {
-                log::error!("Received error: {:#?}", err);
+                match err {
+                    Payload::Text(values) => {
+                        for value in values {
+                            log::error!("Received error: {}", value);
+                        }
+                    }
+                    other => {
+                        log::error!("Received error: {:?}", other);
+                    }
+                }
             }
             .boxed()
         })
@@ -154,7 +165,7 @@ async fn main() {
                 if let Payload::Text(values) = payload {
                     tx_.send(Event::Chat(values))
                         .await
-                        .expect("Could not send chat message to channel");
+                        .expect("Could not send chat payload to channel");
                 }
             }
             .boxed()
@@ -191,7 +202,6 @@ async fn main() {
                 }
                 Event::Disconnect => {
                     log::warn!("Client disconnected from server");
-                    // break;
                 }
                 Event::Terminate => {
                     log::info!("Terminating cupcake");
@@ -203,7 +213,7 @@ async fn main() {
 
     // Wait for SIGINT (Ctrl-C) to end the client.
     match signal::ctrl_c().await {
-        Ok(()) => log::debug!("Received Ctrl+C"),
+        Ok(()) => log::debug!("Received SIGINT"),
         Err(err) => {
             log::error!("Unable to listen to shutdown signal: {}", err);
         }
