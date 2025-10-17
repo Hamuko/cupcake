@@ -92,7 +92,7 @@ impl Team {
         if !text.starts_with("-team") {
             return None;
         }
-        if text.chars().last() != Some('-') {
+        if !text.ends_with('-') {
             return None;
         }
         let name = &text[5..text.len() - 1];

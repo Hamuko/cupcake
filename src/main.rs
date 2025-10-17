@@ -93,7 +93,6 @@ async fn join_channel(client: &Client, channel_name: &str) {
         Ok(_) => log::info!("Joined channel {}", channel_name),
         Err(e) => {
             log::error!("Could not join channel {}: {}", channel_name, e);
-            return;
         }
     };
 }
@@ -122,7 +121,7 @@ async fn lookup_socket_address(
     let content = response.text().await.map_err(SocketAddressError::Request)?;
     let socket_config: data::SocketConfig =
         serde_json::from_str(&content).map_err(SocketAddressError::Parse)?;
-    for server in socket_config.servers {
+    if let Some(server) = socket_config.servers.into_iter().next() {
         log::info!("Found {}", server.url);
         return Ok(server.url);
     }
@@ -250,7 +249,7 @@ async fn main() {
                         }
                         last_timestamp = chat.time;
 
-                        match write!(&mut file, "{}\n", chat) {
+                        match writeln!(&mut file, "{}", chat) {
                             Ok(_) => log::debug!("{}", chat),
                             Err(e) => log::warn!("Failed to write '{}' to file: {}", chat, e),
                         };
