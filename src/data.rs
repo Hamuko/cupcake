@@ -20,6 +20,13 @@ impl Display for ChatMessage {
     }
 }
 
+#[derive(Debug, Deserialize, PartialEq)]
+pub struct Login {
+    pub error: Option<String>,
+    pub name: Option<String>,
+    pub success: bool,
+}
+
 #[derive(Debug, PartialEq)]
 pub struct MessageContainer {
     text: String,
@@ -110,7 +117,7 @@ pub struct SocketConfigServer {
 mod tests {
     use test_case::test_case;
 
-    use super::{ChatMessage, MessageContainer, Team};
+    use super::{ChatMessage, Login, MessageContainer, Team};
     use serde_json::json;
 
     #[test]
@@ -221,6 +228,41 @@ mod tests {
             },
         };
         assert_eq!(format!("{}", chat), "1760634889806\tvg\tDog\t5 &gt; 3");
+    }
+
+    #[test]
+    fn login_deserialize_error() {
+        let json = json!({
+            "error": "That username is registered.",
+            "success": false
+        });
+        let login: Login = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            login,
+            Login {
+                error: Some("That username is registered.".into()),
+                name: None,
+                success: false,
+            }
+        )
+    }
+
+    #[test]
+    fn login_deserialize_success() {
+        let json = json!({
+            "guest": true,
+            "name": "cupcake1",
+            "success": true
+        });
+        let login: Login = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            login,
+            Login {
+                error: None,
+                name: Some("cupcake1".into()),
+                success: true,
+            }
+        )
     }
 
     #[test_case(Team::Empty, "NULL" ; "empty")]

@@ -6,7 +6,7 @@ use clap::Parser;
 use futures_util::FutureExt;
 use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Payload, TransportType};
-use serde_json::json;
+use serde_json::{json, Value};
 use simple_logger::SimpleLogger;
 use std::fs::File;
 use std::io::prelude::*;
@@ -28,12 +28,18 @@ struct Args {
     /// Application logging level.
     #[clap(long, default_value_t = log::LevelFilter::Info)]
     log_level: log::LevelFilter,
+
+    /// Join as guest with the given name.
+    /// This prevents receiving messages from shadowbanned users.
+    #[clap(long)]
+    guest_login: Option<String>,
 }
 
 #[derive(Debug)]
 enum Event {
-    Chat(Vec<serde_json::value::Value>),
+    Chat(Vec<Value>),
     Disconnect,
+    Login(Vec<Value>),
     Terminate,
 }
 
@@ -54,6 +60,30 @@ fn create_chat_log_file(channel: &str) -> File {
     file
 }
 
+fn handle_login_event(values: Vec<Value>) {
+    for value in values {
+        let login: data::Login = match serde_json::from_value(value) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Could not parse login payload: {}", e);
+                continue;
+            }
+        };
+
+        if login.success {
+            log::info!(
+                "Logged in as guest {}",
+                login.name.unwrap_or("Unknown".into())
+            );
+        } else {
+            log::warn!(
+                "Login failed: {}",
+                login.error.unwrap_or("Unknown error".into())
+            );
+        }
+    }
+}
+
 /// Join a channel on the Cytube server.
 async fn join_channel(client: &Client, channel_name: &str) {
     match client
@@ -64,6 +94,16 @@ async fn join_channel(client: &Client, channel_name: &str) {
         Err(e) => {
             log::error!("Could not join channel {}: {}", channel_name, e);
             return;
+        }
+    };
+}
+
+/// Login as a guest user on the Cytube server.
+async fn login_as_guest(client: &Client, name: &str) {
+    match client.emit("login", json!({"name": name})).await {
+        Ok(_) => log::debug!("Login request sent"),
+        Err(e) => {
+            log::error!("Could not send login request: {}", e);
         }
     };
 }
@@ -123,14 +163,19 @@ async fn main() {
     let (tx, mut rx) = mpsc::channel(BUFFER_COUNT);
     let chat_tx = tx.clone();
     let disconnect_tx = tx.clone();
+    let login_tx = tx.clone();
 
     let socket = ClientBuilder::new(socket_address)
         .transport_type(TransportType::Any)
         .on(rust_socketio::Event::Connect, move |_, client| {
             let channel_name = args.channel.clone();
+            let guest_login = args.guest_login.clone();
             async move {
                 log::info!("Connected to server");
                 join_channel(&client, &channel_name).await;
+                if let Some(username) = guest_login {
+                    login_as_guest(&client, &username).await;
+                }
             }
             .boxed()
         })
@@ -170,6 +215,17 @@ async fn main() {
             }
             .boxed()
         })
+        .on("login", move |payload, _| {
+            let tx_ = login_tx.clone();
+            async move {
+                if let Payload::Text(values) = payload {
+                    tx_.send(Event::Login(values))
+                        .await
+                        .expect("Could not send login payload to channel");
+                }
+            }
+            .boxed()
+        })
         .connect()
         .await
         .expect("Connection failed");
@@ -203,6 +259,7 @@ async fn main() {
                 Event::Disconnect => {
                     log::warn!("Client disconnected from server");
                 }
+                Event::Login(values) => handle_login_event(values),
                 Event::Terminate => {
                     log::info!("Terminating cupcake");
                     break;
