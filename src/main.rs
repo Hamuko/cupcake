@@ -8,12 +8,13 @@ use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Payload, TransportType};
 use serde_json::{json, Value};
 use simple_logger::SimpleLogger;
-use std::fs::File;
-use std::io::prelude::*;
+use tokio::fs::File;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::signal;
 use tokio::sync::mpsc;
 
 const BUFFER_COUNT: usize = 64;
+const WRITE_BUFFER_SIZE: usize = 8 * 1024; // 8 KiB
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -49,13 +50,15 @@ enum SocketAddressError {
     Request(reqwest::Error),
 }
 
-fn create_chat_log_file(channel: &str) -> File {
+async fn create_chat_log_file(channel: &str) -> File {
     let filename = format!(
         "chat-{}-{}Z.txt",
         channel,
         Utc::now().format("%Y%m%dT%H%M%S")
     );
-    let file = File::create(&filename).expect("Could not create output file");
+    let file = File::create(&filename)
+        .await
+        .expect("Could not create output file");
     log::info!("Created chat log file {}", filename);
     file
 }
@@ -157,7 +160,8 @@ async fn main() {
         }
     };
 
-    let mut file = create_chat_log_file(&args.channel);
+    let file = create_chat_log_file(&args.channel).await;
+    let mut file_buffer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
     let (tx, mut rx) = mpsc::channel(BUFFER_COUNT);
     let chat_tx = tx.clone();
@@ -249,9 +253,14 @@ async fn main() {
                         }
                         last_timestamp = chat.time;
 
-                        match writeln!(&mut file, "{}", chat) {
+                        match file_buffer
+                            .write_all(format!("{}\n", chat).as_bytes())
+                            .await
+                        {
                             Ok(_) => log::debug!("{}", chat),
-                            Err(e) => log::warn!("Failed to write '{}' to file: {}", chat, e),
+                            Err(e) => {
+                                log::warn!("Failed to write '{}' to file buffer: {}", chat, e)
+                            }
                         };
                     }
                 }
@@ -264,6 +273,10 @@ async fn main() {
                     break;
                 }
             }
+        }
+        match file_buffer.flush().await {
+            Ok(()) => log::debug!("File buffer flushed"),
+            Err(e) => log::error!("Failed to flush file buffer: {}", e),
         }
     });
 
@@ -280,7 +293,7 @@ async fn main() {
 
     manager.await.unwrap();
 
-    // Disconnect the WebSocket client and end the file.
+    // Disconnect the WebSocket client.
     log::info!("Disconnecting client");
     socket
         .disconnect()
