@@ -8,6 +8,22 @@ pub struct ChatMessage {
     pub username: String,
     #[serde(deserialize_with = "MessageContainer::deserialize_from")]
     pub msg: MessageContainer,
+    pub meta: ChatMeta,
+}
+
+impl ChatMessage {
+    /// Short format of the message for logging purposes.
+    pub fn short_format(&self) -> String {
+        format!("<{}> {}", self.username, self.msg.text)
+    }
+
+    /// Message is a server whisper and should not be logged.
+    pub fn should_be_skipped(&self) -> bool {
+        if let Some(add_class) = &self.meta.add_class {
+            return add_class == "server-whisper";
+        }
+        false
+    }
 }
 
 impl Display for ChatMessage {
@@ -18,6 +34,12 @@ impl Display for ChatMessage {
             self.time, self.msg.team, self.username, self.msg.text
         )
     }
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMeta {
+    add_class: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -117,7 +139,7 @@ pub struct SocketConfigServer {
 mod tests {
     use test_case::test_case;
 
-    use super::{ChatMessage, Login, MessageContainer, Team};
+    use super::{ChatMessage, ChatMeta, Login, MessageContainer, Team};
     use serde_json::json;
 
     #[test]
@@ -141,6 +163,7 @@ mod tests {
                         <img src=\"https://example.com/image.jpg?ex=1234&amp;is=5678\" /></a>".into(),
                     team: Team::Empty,
                 },
+                meta: ChatMeta { add_class: None },
             }
         )
     }
@@ -166,6 +189,9 @@ mod tests {
                     text: "&gt;XD".into(),
                     team: Team::Named("wg".into()),
                 },
+                meta: ChatMeta {
+                    add_class: Some("greentext".into())
+                },
             }
         )
     }
@@ -189,6 +215,7 @@ mod tests {
                     text: ":harmony: :harmony:".into(),
                     team: Team::Named("ck".into()),
                 },
+                meta: ChatMeta { add_class: None },
             }
         )
     }
@@ -212,13 +239,46 @@ mod tests {
                     text: "It's hip to be square.".into(),
                     team: Team::Empty,
                 },
+                meta: ChatMeta { add_class: None },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_deserialize_server_whisper() {
+        let timestamp: u64 = 1761058613150;
+        let msg = String::from(
+            "Voteskip passed: 1/2 skipped; eligible voters: 2 = \
+            total (2) - AFK (0) - no permission (0); ratio = 0.5",
+        );
+        let json = json!({
+            "username": "[voteskip]",
+            "msg": msg,
+            "meta": {
+                "addClass": "server-whisper",
+                "addClassToNameAndTimestamp": true
+            },
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "[voteskip]".into(),
+                msg: MessageContainer {
+                    text: msg,
+                    team: Team::Empty,
+                },
+                meta: ChatMeta {
+                    add_class: Some("server-whisper".into())
+                },
             }
         )
     }
 
     #[test]
     fn chat_message_display() {
-        //42["chatMsg",{"username":"InuDoggo","msg":" <span style=\"display:none\" class=\"teamColorSpan\">-teamm-</span>","meta":{"addClass":"spoiler"},"time":}]
         let chat = ChatMessage {
             time: 1760634889806,
             username: "Dog".into(),
@@ -226,8 +286,69 @@ mod tests {
                 text: "5 &gt; 3".into(),
                 team: Team::Named("vg".into()),
             },
+            meta: ChatMeta { add_class: None },
         };
         assert_eq!(format!("{}", chat), "1760634889806\tvg\tDog\t5 &gt; 3");
+    }
+
+    #[test]
+    fn chat_message_short_format() {
+        let chat = ChatMessage {
+            time: 1760634889806,
+            username: "Dog".into(),
+            msg: MessageContainer {
+                text: ":carlos:".into(),
+                team: Team::Named("m".into()),
+            },
+            meta: ChatMeta { add_class: None },
+        };
+        assert_eq!(format!("{}", chat.short_format()), "<Dog> :carlos:");
+    }
+
+    #[test]
+    fn chat_message_should_be_skipped_server_whisper() {
+        let chat = ChatMessage {
+            time: 1760634889806,
+            username: "[voteskip]".into(),
+            msg: MessageContainer {
+                text: "Voteskip passed".into(),
+                team: Team::Empty,
+            },
+            meta: ChatMeta {
+                add_class: Some("server-whisper".into()),
+            },
+        };
+        assert_eq!(chat.should_be_skipped(), true);
+    }
+
+    #[test]
+    fn chat_message_should_be_skipped_no_class() {
+        let chat = ChatMessage {
+            time: 1760634889806,
+            username: "Dog".into(),
+            msg: MessageContainer {
+                text: "5 &gt; 3".into(),
+                team: Team::Named("vg".into()),
+            },
+            meta: ChatMeta { add_class: None },
+        };
+        assert_eq!(chat.should_be_skipped(), false);
+    }
+
+    #[test]
+    fn chat_message_should_be_skipped_wrong_class() {
+        let chat = ChatMessage {
+            time: 1760634889806,
+            username: "Dog".into(),
+            msg: MessageContainer {
+                text: "5 &gt; 3".into(),
+                team: Team::Named("vg".into()),
+            },
+            meta: ChatMeta {
+                add_class: Some("greentext".into()),
+            },
+        };
+        assert_eq!(chat.should_be_skipped(), false);
     }
 
     #[test]

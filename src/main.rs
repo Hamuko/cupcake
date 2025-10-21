@@ -253,6 +253,12 @@ async fn main() {
                         }
                         last_timestamp = chat.time;
 
+                        // Ignore special messages.
+                        if chat.should_be_skipped() {
+                            log::debug!("Ignoring message: {}", chat.short_format());
+                            continue;
+                        }
+
                         match file_buffer
                             .write_all(format!("{}\n", chat).as_bytes())
                             .await
