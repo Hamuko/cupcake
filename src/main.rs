@@ -185,7 +185,16 @@ async fn main() {
         .on(rust_socketio::Event::Close, move |payload, _| {
             let tx_ = disconnect_tx.clone();
             async move {
-                log::warn!("Disconnect: {:?}", payload);
+                match payload {
+                    Payload::Text(values) => {
+                        for value in values {
+                            log::warn!("Disconnect: {:?}", value);
+                        }
+                    }
+                    other => {
+                        log::warn!("Disconnect: {:?}", other);
+                    }
+                }
                 tx_.send(Event::Disconnect)
                     .await
                     .expect("Could not send disconnect to channel");
@@ -247,7 +256,8 @@ async fn main() {
                             }
                         };
 
-                        // Ignore past messages in case of reconnects.
+                        // Reconnecting makes the server return the last N messages, meaning
+                        // that messages may be duplicated if we don't ignore old timestamps.
                         if last_timestamp >= chat.time {
                             continue;
                         }
