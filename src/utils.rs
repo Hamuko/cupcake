@@ -3,10 +3,10 @@ pub fn parse_domain(s: &str) -> Result<url::Host, String> {
     if let Ok(host) = url::Host::parse(s) {
         return Ok(host);
     };
-    if let Ok(domain) = url::Url::parse(s) {
-        if let Some(host) = domain.host() {
-            return Ok(host.to_owned());
-        }
+    if let Ok(domain) = url::Url::parse(s)
+        && let Some(host) = domain.host()
+    {
+        return Ok(host.to_owned());
     };
     Err(String::from("Not a valid domain or URL"))
 }

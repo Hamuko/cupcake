@@ -6,7 +6,7 @@ use clap::Parser;
 use futures_util::FutureExt;
 use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Payload, TransportType};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use simple_logger::SimpleLogger;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};

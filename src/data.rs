@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de};
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct ChatMessage {
@@ -72,10 +72,10 @@ impl MessageContainer {
                 html_parser::Node::Element(element)
                     if element.name == "span" && element.classes == ["teamColorSpan"] =>
                 {
-                    if let Some(html_parser::Node::Text(t)) = element.children.first() {
-                        if let Some(named) = Team::named_from_element(t) {
-                            team = named
-                        }
+                    if let Some(html_parser::Node::Text(t)) = element.children.first()
+                        && let Some(named) = Team::named_from_element(t)
+                    {
+                        team = named
                     }
                 }
                 html_parser::Node::Element(element) => {
