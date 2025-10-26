@@ -13,7 +13,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::signal;
 use tokio::sync::mpsc;
 
-const BUFFER_COUNT: usize = 64;
+const MESSAGE_BUFFER_SIZE: usize = 64;
 const WRITE_BUFFER_SIZE: usize = 8 * 1024; // 8 KiB
 
 #[derive(Parser, Debug)]
@@ -163,7 +163,7 @@ async fn main() {
     let file = create_chat_log_file(&args.channel).await;
     let mut file_buffer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
-    let (tx, mut rx) = mpsc::channel(BUFFER_COUNT);
+    let (tx, mut rx) = mpsc::channel(MESSAGE_BUFFER_SIZE);
     let chat_tx = tx.clone();
     let disconnect_tx = tx.clone();
     let login_tx = tx.clone();
