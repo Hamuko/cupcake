@@ -27,12 +27,15 @@ struct Args {
     channel: String,
 
     /// Application logging level.
-    #[clap(long, default_value_t = log::LevelFilter::Info)]
+    #[clap(long, value_name = "LEVEL", default_value_t = log::LevelFilter::Info)]
     log_level: log::LevelFilter,
 
     /// Join as guest with the given name.
-    /// This prevents receiving messages from shadowbanned users.
-    #[clap(long)]
+    ///
+    /// This prevents receiving messages from shadow-banned users and
+    /// makes cupcake visible in the cytube channel's member list.
+    /// Username must be unique and non-registered for the option to work.
+    #[clap(long, value_name = "USERNAME")]
     guest_login: Option<String>,
 }
 
