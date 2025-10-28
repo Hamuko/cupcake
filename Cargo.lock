@@ -303,6 +303,7 @@ dependencies = [
  "simple_logger",
  "test-case",
  "tokio",
+ "tokio-util",
  "url",
 ]
 

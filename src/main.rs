@@ -10,8 +10,13 @@ use serde_json::{Value, json};
 use simple_logger::SimpleLogger;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::select;
 use tokio::signal;
 use tokio::sync::mpsc;
+use tokio::time::Duration;
+use tokio_util::sync::CancellationToken;
+
+type EventTx = mpsc::Sender<Event>;
 
 const MESSAGE_BUFFER_SIZE: usize = 64;
 const WRITE_BUFFER_SIZE: usize = 8 * 1024; // 8 KiB
@@ -37,6 +42,10 @@ struct Args {
     /// Username must be unique and non-registered for the option to work.
     #[clap(long, value_name = "USERNAME")]
     guest_login: Option<String>,
+
+    /// Rotate the chat log file after a certain number of hours.
+    #[clap(long, value_name = "HOURS")]
+    rotate_file: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -44,6 +53,7 @@ enum Event {
     Chat(Vec<Value>),
     Disconnect,
     Login(Vec<Value>),
+    RotateLog,
     Terminate,
 }
 
@@ -134,6 +144,27 @@ async fn lookup_socket_address(
     Err(SocketAddressError::NotFound)
 }
 
+/// Periodically send a log rotation event to the main task.
+async fn rotate_file_loop(token: CancellationToken, tx: EventTx, hours: u64) {
+    let rotate_interval = Duration::from_secs(hours * 60 * 60);
+    let mut interval = tokio::time::interval(rotate_interval);
+    interval.tick().await;
+    loop {
+        select! {
+            _ = token.cancelled() => {
+                log::debug!("Ending log rotation task");
+                break;
+            },
+            _ = interval.tick() => {
+                log::debug!("Log rotation interval reached");
+                if let Err(err) = tx.send(Event::RotateLog).await {
+                    log::error!("Failed to send rotate log event: {}", err);
+                }
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
@@ -171,10 +202,21 @@ async fn main() {
     let disconnect_tx = tx.clone();
     let login_tx = tx.clone();
 
+    // Set up log rotation if --rotate-file is used.
+    let cancellation_token = CancellationToken::new();
+    let rotate_task = match args.rotate_file {
+        Some(hours) => {
+            let future = rotate_file_loop(cancellation_token.clone(), tx.clone(), hours);
+            Some(tokio::spawn(future))
+        }
+        None => None,
+    };
+
+    let channel_name = args.channel.clone();
     let socket = ClientBuilder::new(socket_address)
         .transport_type(TransportType::Any)
         .on(rust_socketio::Event::Connect, move |_, client| {
-            let channel_name = args.channel.clone();
+            let channel_name = channel_name.clone();
             let guest_login = args.guest_login.clone();
             async move {
                 log::info!("Connected to server");
@@ -245,6 +287,7 @@ async fn main() {
         .await
         .expect("Connection failed");
 
+    let channel_name = args.channel.clone();
     let manager = tokio::spawn(async move {
         let mut last_timestamp: u64 = 0;
         while let Some(event) = rx.recv().await {
@@ -287,8 +330,18 @@ async fn main() {
                     log::warn!("Client disconnected from server");
                 }
                 Event::Login(values) => handle_login_event(values),
+                Event::RotateLog => {
+                    log::info!("Rotating log file...");
+                    match file_buffer.flush().await {
+                        Ok(()) => log::debug!("File buffer flushed"),
+                        Err(e) => log::error!("Failed to flush file buffer: {}", e),
+                    };
+                    let file = create_chat_log_file(&channel_name).await;
+                    file_buffer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
+                }
                 Event::Terminate => {
                     log::info!("Terminating cupcake");
+                    cancellation_token.cancel();
                     break;
                 }
             }
@@ -311,6 +364,9 @@ async fn main() {
     }
 
     manager.await.unwrap();
+    if let Some(rotate_task) = rotate_task {
+        rotate_task.await.unwrap();
+    }
 
     // Disconnect the WebSocket client.
     log::info!("Disconnecting client");
