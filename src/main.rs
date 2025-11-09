@@ -1,3 +1,4 @@
+mod channel;
 mod data;
 mod utils;
 
@@ -12,13 +13,9 @@ use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::select;
 use tokio::signal;
-use tokio::sync::mpsc;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-type EventTx = mpsc::Sender<Event>;
-
-const MESSAGE_BUFFER_SIZE: usize = 64;
 const WRITE_BUFFER_SIZE: usize = 8 * 1024; // 8 KiB
 
 #[derive(Parser, Debug)]
@@ -145,7 +142,7 @@ async fn lookup_socket_address(
 }
 
 /// Periodically send a log rotation event to the main task.
-async fn rotate_file_loop(token: CancellationToken, tx: EventTx, hours: u64) {
+async fn rotate_file_loop(token: CancellationToken, tx: channel::EventTx, hours: u64) {
     let rotate_interval = Duration::from_secs(hours * 60 * 60);
     let mut interval = tokio::time::interval(rotate_interval);
     interval.tick().await;
@@ -197,7 +194,8 @@ async fn main() {
     let file = create_chat_log_file(&args.channel).await;
     let mut file_buffer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
-    let (tx, mut rx) = mpsc::channel(MESSAGE_BUFFER_SIZE);
+    let (tx, mut rx) = channel::mpsc_channel();
+
     let chat_tx = tx.clone();
     let disconnect_tx = tx.clone();
     let login_tx = tx.clone();
@@ -290,7 +288,7 @@ async fn main() {
     let channel_name = args.channel.clone();
     let manager = tokio::spawn(async move {
         let mut last_timestamp: u64 = 0;
-        while let Some(event) = rx.recv().await {
+        while let Some(event) = channel::read_event(&mut rx).await {
             match event {
                 Event::Chat(values) => {
                     for value in values {
