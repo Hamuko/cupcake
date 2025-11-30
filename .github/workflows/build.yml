@@ -9,8 +9,14 @@ env:
 
 jobs:
   test:
-    name: Run tests
+    name: Run tests (${{ matrix.feature }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - default
+          - tokio_channels
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -20,9 +26,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ./target
-          key: build-cargo-registry-${{ runner.os }}
+          key: build-cargo-registry-${{ runner.os }}-${{ matrix.feature }}
       - name: Run unit tests
-        run: cargo test --verbose
+        run: cargo test --verbose --no-default-features --features ${{ matrix.feature }}
 
   build:
     name: Build binary - ${{ matrix.platform.os-name }}
