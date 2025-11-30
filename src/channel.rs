@@ -39,3 +39,40 @@ pub async fn read_event(rx: &mut EventRx) -> Option<Event> {
 pub async fn read_event(rx: &mut EventRx) -> Option<Event> {
     rx.recv().await
 }
+#[cfg(test)]
+mod tests {
+    use super::{Event, mpsc_channel, read_event};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn channel() {
+        let (tx, mut rx) = mpsc_channel();
+
+        let manager = tokio::spawn(async move {
+            let mut results: Vec<Event> = Vec::new();
+            while let Some(event) = read_event(&mut rx).await {
+                match event {
+                    Event::Terminate => break,
+                    _ => {
+                        results.push(event);
+                    }
+                }
+            }
+            return results;
+        });
+
+        tx.send(Event::Login(vec![json!("{}")]))
+            .await
+            .expect("Failed to send event");
+        tx.send(Event::Chat(vec![json!("{\"time\": 123456789}")]))
+            .await
+            .expect("Failed to send event");
+        tx.send(Event::Terminate)
+            .await
+            .expect("Failed to send event");
+
+        let results = manager.await.unwrap();
+        assert!(matches!(results[0], Event::Login(_)));
+        assert!(matches!(results[1], Event::Chat(_)));
+    }
+}
