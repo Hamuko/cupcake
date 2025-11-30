@@ -67,7 +67,7 @@ impl MessageContainer {
         for child in dom.children {
             match child {
                 html_parser::Node::Text(t) => {
-                    text += &t;
+                    text += &t.replace('"', "&quot;");
                 }
                 html_parser::Node::Element(element)
                     if element.name == "span" && element.classes == ["teamColorSpan"] =>
@@ -273,6 +273,57 @@ mod tests {
                 meta: ChatMeta {
                     add_class: Some("server-whisper".into())
                 },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_deserialize_quotes() {
+        let timestamp: u64 = 1760634672025;
+        let json = json!({
+            "username": "Quot",
+            "msg": "\"He'll be fine\"",
+            "meta": {},
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "Quot".into(),
+                msg: MessageContainer {
+                    text: "&quot;He'll be fine&quot;".into(),
+                    team: Team::Empty,
+                },
+                meta: ChatMeta { add_class: None },
+            }
+        )
+    }
+
+    #[test]
+    fn chat_message_deserialize_quotes_and_links() {
+        let timestamp: u64 = 1760634672025;
+        let json = json!({
+            "username": "Quot",
+            "msg": "\"He'll be fine\" <a href=\"http://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">\
+                http://example.com</a> <span style=\"display:none\" class=\"teamColorSpan\">-teamvst-</span>",
+            "meta": {},
+            "time": timestamp
+        });
+        let chat: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            chat,
+            ChatMessage {
+                time: timestamp,
+                username: "Quot".into(),
+                msg: MessageContainer {
+                    text: "&quot;He'll be fine&quot; \
+                        <a href=\"http://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">\
+                        http://example.com</a>".into(),
+                    team: Team::Named("vst".into()),
+                },
+                meta: ChatMeta { add_class: None },
             }
         )
     }
