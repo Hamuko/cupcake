@@ -43,6 +43,24 @@ cupcake [OPTIONS] <DOMAIN> <CHANNEL>
 
 For full usage instructions, run `cupcake --help`.
 
+### Docker
+
+cupcake is also available as a Docker image.
+
+Example Docker Compose manifest:
+
+```yaml
+version: '3.7'
+services:
+  cupcake:
+    container_name: cupcake
+    image: ghcr.io/hamuko/cupcake:latest
+    command: cytu.be xxxx
+    volumes:
+      - /path/to/cupcake/dir:/cupcake
+    restart: on-failure
+```
+
 ### Filtering messages
 
 Cytube sends all chat messages, including ones from shadow-banned users, to anonymous connections.
