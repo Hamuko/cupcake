@@ -1,3 +1,18 @@
+use regex::Regex;
+use std::sync::LazyLock;
+
+/// Determine if the error message indicates a throttling error.
+pub fn check_throttling_error(string: &str) -> Option<u64> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"Guest logins are restricted to one per IP address per (\d+) seconds").unwrap()
+    });
+    if let Some(captures) = RE.captures(string) {
+        captures.get(1).unwrap().as_str().parse::<u64>().ok()
+    } else {
+        None
+    }
+}
+
 /// Parse host from plain domain name or URL.
 pub fn parse_domain(s: &str) -> Result<url::Host, String> {
     if let Ok(host) = url::Host::parse(s) {
@@ -14,6 +29,14 @@ pub fn parse_domain(s: &str) -> Result<url::Host, String> {
 #[cfg(test)]
 mod tests {
     use test_case::test_case;
+
+    #[test_case("Guest logins are restricted to one per IP address per 60 seconds.", Some(60); "normal error")]
+    #[test_case("Guest logins are restricted to one per IP address per 9999 seconds.", Some(9999); "longer error")]
+    #[test_case("Guest logins are restricted to one per IP address per N seconds.", None; "non-numerical error")]
+    #[test_case("Something bad happened", None; "unknown error")]
+    fn check_throttling_error(input: &str, expected: Option<u64>) {
+        assert_eq!(super::check_throttling_error(input), expected);
+    }
 
     #[test_case("cytu.be", Some("cytu.be"); "plain domain")]
     #[test_case("https://cytu.be", Some("cytu.be"); "URL")]

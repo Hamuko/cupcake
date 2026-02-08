@@ -9,11 +9,12 @@ use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Payload, TransportType};
 use serde_json::{Value, json};
 use simple_logger::SimpleLogger;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::select;
 use tokio::signal;
-use tokio::time::Duration;
+use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 
 const WRITE_BUFFER_SIZE: usize = 8 * 1024; // 8 KiB
@@ -54,6 +55,11 @@ enum Event {
     Terminate,
 }
 
+enum LoginError {
+    Throttled(u64),
+    Unknown(Option<String>),
+}
+
 enum SocketAddressError {
     NotFound,
     Parse(serde_json::Error),
@@ -73,7 +79,7 @@ async fn create_chat_log_file(channel: &str) -> File {
     file
 }
 
-fn handle_login_event(values: Vec<Value>) {
+fn handle_login_event(values: Vec<Value>) -> Result<(), LoginError> {
     for value in values {
         let login: data::Login = match serde_json::from_value(value) {
             Ok(v) => v,
@@ -86,15 +92,21 @@ fn handle_login_event(values: Vec<Value>) {
         if login.success {
             log::info!(
                 "Logged in as guest {}",
-                login.name.unwrap_or("Unknown".into())
+                login.name.unwrap_or("<UNKNOWN>".into())
             );
+            return Ok(());
         } else {
-            log::warn!(
-                "Login failed: {}",
-                login.error.unwrap_or("Unknown error".into())
-            );
+            if let Some(error_message) = login.error {
+                if let Some(duration) = utils::check_throttling_error(&error_message) {
+                    return Err(LoginError::Throttled(duration));
+                } else {
+                    return Err(LoginError::Unknown(Some(error_message)));
+                }
+            }
+            return Err(LoginError::Unknown(None));
         }
     }
+    Err(LoginError::Unknown(None))
 }
 
 /// Join a channel on the Cytube server.
@@ -211,16 +223,18 @@ async fn main() {
     };
 
     let channel_name = args.channel.clone();
+    let guest_login = Arc::new(args.guest_login);
+    let connect_guest_login = guest_login.clone();
     let socket = ClientBuilder::new(socket_address)
         .transport_type(TransportType::Any)
         .on(rust_socketio::Event::Connect, move |_, client| {
             let channel_name = channel_name.clone();
-            let guest_login = args.guest_login.clone();
+            let username = connect_guest_login.clone();
             async move {
                 log::info!("Connected to server");
                 join_channel(&client, &channel_name).await;
-                if let Some(username) = guest_login {
-                    login_as_guest(&client, &username).await;
+                if let Some(username) = &*username {
+                    login_as_guest(&client, username).await;
                 }
             }
             .boxed()
@@ -286,6 +300,7 @@ async fn main() {
         .expect("Connection failed");
 
     let channel_name = args.channel.clone();
+    let manager_socket = socket.clone();
     let manager = tokio::spawn(async move {
         let mut last_timestamp: u64 = 0;
         while let Some(event) = channel::read_event(&mut rx).await {
@@ -327,7 +342,24 @@ async fn main() {
                 Event::Disconnect => {
                     log::warn!("Client disconnected from server");
                 }
-                Event::Login(values) => handle_login_event(values),
+                Event::Login(values) => match handle_login_event(values) {
+                    Ok(_) => {}
+                    Err(LoginError::Throttled(seconds)) => {
+                        log::warn!("Guest login throttled; retrying in {} seconds", seconds);
+                        let username = guest_login.clone();
+                        let socket = manager_socket.clone();
+                        let _ = tokio::spawn(async move {
+                            sleep(Duration::from_secs(seconds)).await;
+                            if let Some(username) = &*username {
+                                login_as_guest(&socket, username).await;
+                            }
+                        });
+                    }
+                    Err(LoginError::Unknown(Some(message))) => {
+                        log::warn!("Login failed: {}", message)
+                    }
+                    Err(LoginError::Unknown(None)) => log::warn!("Login failed"),
+                },
                 Event::RotateLog => {
                     log::info!("Rotating log file...");
                     match file_buffer.flush().await {

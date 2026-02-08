@@ -10,6 +10,7 @@ crossfire = { version = "2.1.6", optional = true }
 futures-util = "0.3"
 html_parser = "0.7"
 log = "0.4"
+regex = "1.12"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 rust_socketio = { version = "0.6", features = ["async"] }
 serde = { version = "1.0", features = ["derive"] }
