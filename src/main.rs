@@ -252,9 +252,7 @@ async fn main() {
                         log::warn!("Disconnect: {:?}", other);
                     }
                 }
-                tx_.send(Event::Disconnect)
-                    .await
-                    .expect("Could not send disconnect to channel");
+                let _ = tx_.send(Event::Disconnect).await;
             }
             .boxed()
         })
@@ -341,6 +339,7 @@ async fn main() {
                 }
                 Event::Disconnect => {
                     log::warn!("Client disconnected from server");
+                    break;
                 }
                 Event::Login(values) => match handle_login_event(values) {
                     Ok(_) => {}
