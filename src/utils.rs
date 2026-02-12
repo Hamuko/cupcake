@@ -6,11 +6,9 @@ pub fn check_throttling_error(string: &str) -> Option<u64> {
     static RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"Guest logins are restricted to one per IP address per (\d+) seconds").unwrap()
     });
-    if let Some(captures) = RE.captures(string) {
-        captures.get(1).unwrap().as_str().parse::<u64>().ok()
-    } else {
-        None
-    }
+    let captures = RE.captures(string)?;
+    let duration_capture = captures.get(1)?;
+    duration_capture.as_str().parse::<u64>().ok()
 }
 
 /// Parse host from plain domain name or URL.
