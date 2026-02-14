@@ -2,6 +2,8 @@
 name = "cupcake"
 version = "0.3.0"
 edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/Hamuko/cupcake"
 
 [dependencies]
 chrono = "0.4"
