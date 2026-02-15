@@ -28,4 +28,8 @@ COPY --from=build /cupcake/target/release/cupcake /bin/cupcake
 
 WORKDIR /cupcake
 
+ENV CUPCAKE_GUEST_LOGIN=
+ENV CUPCAKE_LOG_LEVEL=info
+ENV CUPCAKE_ROTATE_FILE=
+
 ENTRYPOINT ["cupcake"]

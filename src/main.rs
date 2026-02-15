@@ -30,7 +30,7 @@ struct Args {
     channel: String,
 
     /// Application logging level.
-    #[clap(long, value_name = "LEVEL", default_value_t = log::LevelFilter::Info)]
+    #[clap(long, value_name = "LEVEL", default_value_t = log::LevelFilter::Info, env = "CUPCAKE_LOG_LEVEL")]
     log_level: log::LevelFilter,
 
     /// Join as guest with the given name.
@@ -38,11 +38,11 @@ struct Args {
     /// This prevents receiving messages from shadow-banned users and
     /// makes cupcake visible in the cytube channel's member list.
     /// Username must be unique and non-registered for the option to work.
-    #[clap(long, value_name = "USERNAME")]
+    #[clap(long, value_name = "USERNAME", env = "CUPCAKE_GUEST_LOGIN")]
     guest_login: Option<String>,
 
     /// Rotate the chat log file after a certain number of hours.
-    #[clap(long, value_name = "HOURS")]
+    #[clap(long, value_name = "HOURS", env = "CUPCAKE_ROTATE_FILE")]
     rotate_file: Option<u64>,
 }
 
