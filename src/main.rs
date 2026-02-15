@@ -174,6 +174,28 @@ async fn rotate_file_loop(token: CancellationToken, tx: channel::EventTx, hours:
     }
 }
 
+#[cfg(unix)]
+/// Wait for SIGINT (Ctrl-C) or SIGTERM to end the client (Unix).
+async fn wait_termination() {
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+        .expect("Could not register SIGTERM handler");
+    select! {
+        _ = signal::ctrl_c() => log::debug!("Received SIGINT"),
+        _ = sigterm.recv() => log::debug!("Received SIGTERM"),
+    }
+}
+
+#[cfg(not(unix))]
+/// Wait for SIGINT (Ctrl-C) to end the client (Windows).
+async fn wait_termination() {
+    match signal::ctrl_c().await {
+        Ok(()) => log::debug!("Received SIGINT"),
+        Err(err) => {
+            log::error!("Unable to listen to shutdown signal: {}", err);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
@@ -381,13 +403,7 @@ async fn main() {
         }
     });
 
-    // Wait for SIGINT (Ctrl-C) to end the client.
-    match signal::ctrl_c().await {
-        Ok(()) => log::debug!("Received SIGINT"),
-        Err(err) => {
-            log::error!("Unable to listen to shutdown signal: {}", err);
-        }
-    }
+    wait_termination().await;
     if let Err(e) = tx.send(Event::Terminate).await {
         log::error!("Could not send termination signal: {}", e);
     }
