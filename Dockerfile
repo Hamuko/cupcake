@@ -20,16 +20,12 @@ RUN cargo build --release --verbose
 
 # RUNTIME CONTAINER
 
-FROM debian:trixie-slim
-
-COPY --from=build /etc/ssl/certs/ /etc/ssl/certs/
+FROM gcr.io/distroless/cc-debian13
 
 COPY --from=build /cupcake/target/release/cupcake /bin/cupcake
 
 WORKDIR /cupcake
 
-ENV CUPCAKE_GUEST_LOGIN=
 ENV CUPCAKE_LOG_LEVEL=info
-ENV CUPCAKE_ROTATE_FILE=
 
-ENTRYPOINT ["cupcake"]
+ENTRYPOINT ["/bin/cupcake"]
