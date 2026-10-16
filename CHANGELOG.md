@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Client will automatically attempt to reconnect to the server on disconnect.
+
 ### Changed
 
 - Docker image now uses Google's ["distroless" base image](https://github.com/GoogleContainerTools/distroless).

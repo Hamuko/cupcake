@@ -248,6 +248,8 @@ async fn main() {
     let guest_login = Arc::new(args.guest_login);
     let connect_guest_login = guest_login.clone();
     let socket = ClientBuilder::new(socket_address)
+        .reconnect_on_disconnect(true)
+        .reconnect_delay(5_000, 120_000)
         .transport_type(TransportType::Any)
         .on(rust_socketio::Event::Connect, move |_, client| {
             let channel_name = channel_name.clone();
@@ -361,7 +363,6 @@ async fn main() {
                 }
                 Event::Disconnect => {
                     log::warn!("Client disconnected from server");
-                    break;
                 }
                 Event::Login(values) => match handle_login_event(values) {
                     Ok(_) => {}
