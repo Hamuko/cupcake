@@ -269,11 +269,11 @@ async fn main() {
                 match payload {
                     Payload::Text(values) => {
                         for value in values {
-                            log::warn!("Disconnect: {:?}", value);
+                            log::debug!("Received disconnect event: {}", value);
                         }
                     }
                     other => {
-                        log::warn!("Disconnect: {:?}", other);
+                        log::debug!("Received disconnect event: {:?}", other);
                     }
                 }
                 let _ = tx_.send(Event::Disconnect).await;
